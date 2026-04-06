@@ -11,6 +11,7 @@ import fitz
 from . import __version__
 from .engine import surgical_replace
 from .fonts import extract_fonts, print_font_table
+from .cleaner import clean_pdf, scan_tool_traces
 from .forensics import (
     fix_quarantine,
     fix_timestamps,
@@ -407,6 +408,134 @@ def cmd_replace(args):
         print()
 
 
+def cmd_clean(args):
+    """Strip forensic traces from a PDF edited by other tools."""
+    out = OutputMode(args.quiet, args.json)
+
+    # Determine output path
+    output = args.output or args.file
+    if output == args.file and not args.in_place:
+        base = args.file.rsplit(".", 1)
+        output = f"{base[0]}_clean.{base[1]}" if len(base) > 1 else f"{args.file}_clean"
+
+    if not out.quiet and not out.json:
+        print(BANNER)
+        print(f"  {_GRAY}Input:{_RST}  {args.file}")
+        print(f"  {_GRAY}Output:{_RST} {output}")
+        print()
+
+    # Scan first to show what we found
+    if not out.quiet and not out.json:
+        _spinner("Scanning for forensic traces")
+
+    with open(args.file, "rb") as f:
+        raw = f.read()
+
+    traces = scan_tool_traces(raw)
+    eof_count = raw.count(b"%%EOF")
+
+    if not out.quiet and not out.json:
+        _done()
+        if traces:
+            for t in traces:
+                print(f"    {_BURG}Found:{_RST} {t['description']} ({t['count']}x)")
+        else:
+            print(f"    {_DIM}No tool watermarks found{_RST}")
+
+        if eof_count > 1:
+            print(f"    {_BURG}Found:{_RST} {eof_count} %%EOF markers (incremental saves)")
+        else:
+            print(f"    {_DIM}Single %%EOF (clean){_RST}")
+        print()
+
+    # Dry run
+    if args.dry_run:
+        if out.json:
+            _json_output({
+                "dry_run": True,
+                "traces": [{"marker": t["marker"].decode(), "count": t["count"], "description": t["description"]} for t in traces],
+                "eof_count": eof_count,
+                "output_path": output,
+            })
+        else:
+            _ok("Dry run complete — no files modified")
+            if traces or eof_count > 1:
+                print(f"  {_GOLD}Traces found.{_RST} Remove --dry-run to clean.\n")
+            else:
+                print(f"  {_DIM}File looks clean already.{_RST}\n")
+        return
+
+    # Run the full clean pipeline
+    if not out.quiet and not out.json:
+        _spinner("Cleaning")
+
+    report = clean_pdf(
+        args.file,
+        output,
+        strip_traces=not args.no_strip,
+        flatten=not args.no_flatten,
+        reset_metadata=not args.no_metadata,
+        producer_override=args.producer,
+        creator_override=args.creator,
+    )
+
+    if not out.quiet and not out.json:
+        _done()
+        print()
+        for step in report["steps"]:
+            print(f"  {_GOLD}{step['name']}{_RST}")
+            for action in step["actions"]:
+                print(f"    {_GRAY}▸{_RST} {action}")
+            print()
+
+        diff = report["size_diff"]
+        print(f"  {_GRAY}Size:{_RST} {report['input_size']} -> {report['output_size']} bytes ({diff:+d})")
+        print(f"\n  {_GOLD}{'━' * 50}{_RST}")
+        _ok("Forensic cleanup complete")
+
+    # Fix timestamps
+    if not args.no_timestamps:
+        if not out.quiet and not out.json:
+            _spinner("Fixing file timestamps")
+        ts_result = fix_timestamps(output)
+        if not out.quiet and not out.json:
+            _done()
+            for msg in ts_result["fixed"]:
+                print(f"    {_DIM}{msg}{_RST}")
+
+    # Fix quarantine
+    if not args.no_quarantine:
+        if not out.quiet and not out.json:
+            _spinner("Setting quarantine attributes")
+        q_result = fix_quarantine(output, args.quarantine_app)
+        if not out.quiet and not out.json:
+            if q_result["fixed"]:
+                _done()
+            elif q_result.get("skipped"):
+                _done("skipped")
+            else:
+                _done()
+
+    # Auto-verify (standalone — not against original, since we intentionally changed it)
+    if args.verify:
+        if not out.quiet and not out.json:
+            print(f"\n  {_GOLD}{'━' * 50}{_RST}")
+        findings = verify_pdf(output)
+        if not out.quiet and not out.json:
+            print_verification(findings)
+
+    if out.json:
+        report["traces_found"] = [
+            {"marker": t["marker"].decode(), "count": t["count"], "description": t["description"]}
+            for t in traces
+        ]
+        _json_output(report)
+    elif not out.quiet:
+        if not args.verify:
+            print(f"\n  {_DIM}Tip: add --verify to run forensic audit on the result{_RST}")
+        print()
+
+
 def cmd_verify(args):
     """Run forensic verification on a PDF."""
     out = OutputMode(args.quiet, args.json)
@@ -452,6 +581,9 @@ def main():
 
   {_GRAY}# JSON output for scripting{_RST}
   phantom-pdf replace doc.pdf --old "100" --new "999" --json
+
+  {_GRAY}# Clean traces left by other tools{_RST}
+  phantom-pdf clean edited.pdf --verify
 
   {_GRAY}# Forensic verification{_RST}
   phantom-pdf verify edited.pdf --original original.pdf
@@ -522,6 +654,44 @@ def main():
     p_replace.add_argument("-q", "--quiet", action="store_true", help="Suppress all output except errors")
     p_replace.add_argument("--json", action="store_true", help="Output results as JSON")
 
+    # === clean ===
+    p_clean = subparsers.add_parser(
+        "clean",
+        help="Strip forensic traces left by other PDF tools",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+{_GOLD}examples:{_RST}
+
+  {_GRAY}# Scan and preview what would be cleaned{_RST}
+  phantom-pdf clean edited.pdf --dry-run
+
+  {_GRAY}# Full cleanup — strip traces, flatten, reset metadata{_RST}
+  phantom-pdf clean edited.pdf --verify
+
+  {_GRAY}# Override Producer metadata to match original tool{_RST}
+  phantom-pdf clean edited.pdf --producer "macOS Quartz PDFContext"
+
+  {_GRAY}# Skip flattening (keep incremental saves){_RST}
+  phantom-pdf clean edited.pdf --no-flatten
+        """,
+    )
+    p_clean.add_argument("file", help="PDF file to clean")
+    p_clean.add_argument("-o", "--output", help="Output path (default: <file>_clean.pdf)")
+    p_clean.add_argument("--in-place", action="store_true", help="Overwrite the input file")
+    p_clean.add_argument("--dry-run", action="store_true", help="Scan and report without modifying")
+    p_clean.add_argument("--verify", action="store_true", help="Run forensic verification after cleaning")
+    p_clean.add_argument("--producer", help="Override Producer metadata field")
+    p_clean.add_argument("--creator", help="Override Creator metadata field")
+    p_clean.add_argument("--no-strip", action="store_true", help="Skip stripping tool watermarks")
+    p_clean.add_argument("--no-flatten", action="store_true", help="Skip flattening incremental saves")
+    p_clean.add_argument("--no-metadata", action="store_true", help="Skip metadata cleanup")
+    p_clean.add_argument("--no-timestamps", action="store_true", help="Skip timestamp fixing")
+    p_clean.add_argument("--no-quarantine", action="store_true", help="Skip quarantine attribute fixing")
+    p_clean.add_argument("--quarantine-app", default="com.google.Chrome",
+                        help="App bundle ID for quarantine (default: Chrome)")
+    p_clean.add_argument("-q", "--quiet", action="store_true", help="Suppress all output except errors")
+    p_clean.add_argument("--json", action="store_true", help="Output as JSON")
+
     # === verify ===
     p_verify = subparsers.add_parser(
         "verify", help="Run forensic audit on a PDF file"
@@ -543,6 +713,7 @@ def main():
         "inspect": cmd_inspect,
         "fonts": cmd_fonts,
         "replace": cmd_replace,
+        "clean": cmd_clean,
         "verify": cmd_verify,
     }
 

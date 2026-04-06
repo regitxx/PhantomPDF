@@ -148,6 +148,32 @@ phantom-pdf replace doc.pdf --old "old" --new "new" --json
 phantom-pdf replace doc.pdf --old "old" --new "new" --no-timestamps --no-quarantine
 ```
 
+### `clean` — Strip traces left by other tools
+
+```bash
+# Scan what traces exist (dry run)
+phantom-pdf clean edited.pdf --dry-run
+
+# Full cleanup — strip watermarks, flatten incremental saves, reset metadata
+phantom-pdf clean edited.pdf --verify
+
+# Override Producer metadata to match the original tool
+phantom-pdf clean edited.pdf --producer "macOS Quartz PDFContext"
+
+# Override both Producer and Creator
+phantom-pdf clean edited.pdf --producer "Original Producer" --creator "Original Creator"
+
+# Skip specific cleanup steps
+phantom-pdf clean edited.pdf --no-flatten --no-strip
+```
+
+**What it cleans:**
+- **Tool watermarks** — removes MuPDF, iText, Ghostscript, pdftk, OpenPDF, and 20+ other tool signatures from the binary
+- **Incremental saves** — flattens multiple `%%EOF` markers into a single clean revision
+- **Metadata** — resets `ModDate` to match `CreationDate`, optionally overrides Producer/Creator
+- **Timestamps** — fixes OS-level file timestamps to match PDF creation date
+- **Quarantine** — sets macOS quarantine attributes to mimic browser download
+
 ### `verify` — Forensic audit
 
 ```bash
@@ -185,6 +211,7 @@ phantom-pdf verify edited.pdf --original original.pdf --json
 | Dry-run mode | Full |
 | Forensic verification | Full |
 | macOS timestamp + quarantine fix | Full |
+| Forensic cleaner (strip traces) | Full |
 | Cross-reference streams | Roadmap |
 | AES/RC4 encrypted PDFs | Roadmap |
 | Multi-page batch (`--all-pages`) | Roadmap |
