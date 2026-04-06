@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phantom-pdf"
+version = "1.0.0"
+description = "Traceless PDF text editing - surgical binary-level text replacement preserving fonts, layout, and metadata."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "regitxx", email = "regitxx@users.noreply.github.com"},
+]
+keywords = ["pdf", "edit", "binary", "forensic", "traceless", "cli"]
+dependencies = [
+    "pymupdf>=1.24.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.scripts]
+phantom-pdf = "phantompdf.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/regitxx/PhantomPDF"
+Repository = "https://github.com/regitxx/PhantomPDF"
+Issues = "https://github.com/regitxx/PhantomPDF/issues"
+
+[tool.setuptools.packages.find]
+include = ["phantompdf*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
