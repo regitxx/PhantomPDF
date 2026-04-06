@@ -36,17 +36,30 @@ Every PDF editor leaves fingerprints. When tools like PyMuPDF, pdftk, Ghostscrip
 - Modified metadata (`Producer`, `ModDate`)
 - Incremental save markers (multiple `%%EOF`)
 
-**PhantomPDF doesn't do any of that.**
+**PhantomPDF solves all of this.** Its `replace` command edits text without leaving any of those traces. And if a file was *already* edited by another tool, the `clean` command scrubs those fingerprints away — stripping watermarks, flattening incremental saves, and resetting metadata at the binary level.
 
 ## How It Works
 
-Instead of re-rendering or re-saving, PhantomPDF performs **surgical content stream patching** — the only bytes that change are the ones encoding your text:
+### Replace — surgical text editing
+
+PhantomPDF performs **surgical content stream patching** — the only bytes that change are the ones encoding your text:
 
 1. **Decompresses** only the target content stream
 2. **Locates text** via CID font encoding (handles Identity-H CID fonts)
 3. **Swaps the encoded bytes** in the TJ/Tj operators
 4. **Recompresses** and patches the binary in-place
 5. **Recalculates** xref table offsets
+6. **Fixes** OS-level timestamps and quarantine attributes
+
+### Clean — forensic trace removal
+
+For PDFs already edited by other tools, PhantomPDF strips the evidence:
+
+1. **Scans** for 25+ known tool watermarks in the binary
+2. **Strips** watermarks by replacing with spaces (preserves xref offsets)
+3. **Flattens** incremental saves (multiple `%%EOF` → single revision)
+4. **Resets** `ModDate` to match `CreationDate` at the binary level
+5. **Overrides** Producer/Creator metadata without re-saving (no new fingerprints)
 6. **Fixes** OS-level timestamps and quarantine attributes
 
 The result is a file that's structurally identical to the original — same header, same objects, same metadata, same fonts. The built-in forensic verifier confirms zero detectable traces.
